@@ -30,19 +30,26 @@ class ProducerAgent:
             for msg in context["history"]
         )
 
+        # Context-aware instructions
+        doc_presence = (
+            "Utilize document context where applicable"
+            if context["documents"]
+            else "No documents available - rely on general knowledge"
+        )
+
         feedback_section = (
             f"FEEDBACK FROM PREVIOUS ATTEMPT:\n{feedback}\n"
             if feedback
-            else "Provide the best possible response"
+            else "Provide a natural conversational response"
         )
 
         return PromptTemplate(
             input_variables=["documents", "history", "question"], template=self.template
         ).format(
-            documents=context["documents"] or "No documents uploaded yet.",
+            documents=context["documents"] or "No documents available",
             history=history_text,
             question=question,
-            feedback=feedback_section,
+            feedback=f"{feedback_section}\n{doc_presence}",
         )
 
     async def generate_response(self, context, question, feedback=None):
