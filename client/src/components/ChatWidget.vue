@@ -1,9 +1,13 @@
 // src/components/ChatWidget.vue
 <template>
   <div class="chat-container">
+    <div class="file-upload-area" v-if="isOpen">
+      <input type="file" accept="application/pdf" @change="handleFileUpload" ref="fileInput">
+      <button @click="triggerFileUpload">Upload PDF Document</button>
+    </div>
     <beautiful-chat :participants="participants" :titleImageUrl="titleImageUrl" :onMessageWasSent="onMessageWasSent"
       :messageList="messageList" :newMessagesCount="newMessagesCount" :isOpen="isOpen" :close="closeChat"
-      :open="openChat" :showEmoji="true" :showFile="true" :acceptedFileTypes="['application/pdf']"
+      :open="openChat" :showEmoji="true" :showFile="false" :acceptedFileTypes="['application/pdf']"
       :showTypingIndicator="showTypingIndicator" :colors="colors" :alwaysScrollToBottom="true" :messageStyling="true">
       <template v-slot:header>
         <div class="sc-header--title">
@@ -54,6 +58,8 @@ export default {
     const newMessagesCount = ref(0);
     const showTypingIndicator = ref(false);
     const wsService = ref(null);
+    const fileInput = ref(null);
+    const sessionId = ref(null);
 
     const botAvatarUrl = 'https://static.arttacsolutions.com/img/icon_atthene_interaction.svg';
 
@@ -92,30 +98,48 @@ export default {
       }
     };
 
+    const wsUrl = computed(() => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${window.location.host}/ws/chat/`;
+    });
+
     // Connect to WebSocket with error handling
     onMounted(() => {
-      wsService.value = new WebSocketService(props.websocketUrl);
+      // Generate UUID for session if not exists
+      sessionId.value = localStorage.getItem('chatSessionId') || crypto.randomUUID();
+      localStorage.setItem('chatSessionId', sessionId.value);
+
+      // Initialize WebSocket with session ID
+      const wsUrlWithSession = `${props.websocketUrl}?session_id=${sessionId.value}`;
+      wsService.value = new WebSocketService(wsUrlWithSession);
 
       wsService.value.onMessage((message) => {
+        console.log('Received message:', message); // Debug log
+
         if (message.type === 'typing') {
           showTypingIndicator.value = message.isTyping;
         } else if (message.type === 'message') {
-          // Convert markdown to HTML
-          const html = marked(message.message);
-
           messageList.value.push({
             type: 'text',
             author: 'bot',
             data: {
               text: message.message,
-              meta: new Date().toLocaleString(),
-              html: html
+              meta: new Date().toLocaleString()
             }
           });
 
           if (!isOpen.value) {
             newMessagesCount.value += 1;
           }
+        } else if (message.type === 'error') {
+          messageList.value.push({
+            type: 'text',
+            author: 'bot',
+            data: {
+              text: message.message,
+              meta: new Date().toLocaleString()
+            }
+          });
         }
       });
 
@@ -154,79 +178,70 @@ export default {
     });
 
     const onMessageWasSent = async (message) => {
-      if (message.type === 'file') {
-        handleFileUpload(message.data.file);
-        return;
-      } else {
-        // Handle text message (existing code)
+      if (message.type === 'text') {
+        // Add message to chat immediately
         messageList.value.push({
           type: 'text',
           author: 'me',
-          data: { text: message.data.text, meta: new Date().toLocaleString() }
+          data: {
+            text: message.data.text,
+            meta: new Date().toLocaleString()
+          }
         });
 
+        // Send to WebSocket
         if (wsService.value) {
           try {
-            wsService.value.send({
+            await wsService.value.send({
               type: 'message',
               text: message.data.text
             });
           } catch (e) {
-            console.warn('Failed to send message:', e);
+            console.error('Failed to send message:', e);
+            messageList.value.push({
+              type: 'text',
+              author: 'bot',
+              data: {
+                text: 'Error: Failed to send message',
+                meta: new Date().toLocaleString()
+              }
+            });
           }
         }
       }
     };
 
-    const handleFileUpload = (file) => {
-      // Create message object with required meta field
-      const message = {
-        author: 'me',
-        type: 'file',
-        id: Date.now().toString(),
-        isEdited: false,
-        data: {
-          file: {
-            name: file.name,
-            url: URL.createObjectURL(file),
-          }
-        }
-      }
-      messageList.value.push(message)
+    const handleFileUpload = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
 
-      // Send file to server via WebSocket
-      if (wsService.value) {
-        // Create FormData to send file
-        const formData = new FormData();
-        formData.append('file', file);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('session_id', sessionId.value); // Add session ID to form data
 
-        // Make API call to upload file
-        fetch('http://localhost:8000/api/upload/', {
+      try {
+        const response = await fetch('http://localhost:8000/api/upload/', {
           method: 'POST',
           body: formData
-        })
-          .then(response => response.json())
-          .then(data => {
-            // Send message to inform about successful upload
-            wsService.value.send({
-              type: 'file',
-              fileName: file.name,
-              documentId: data.document_id,
-              sessionId: data.session_id
-            });
-          })
-          .catch(error => {
-            console.error('Error uploading file:', error);
-            messageList.value.push({
-              type: 'text',
-              author: 'bot',
-              data: {
-                text: 'Error uploading file. Please try again.',
-                meta: new Date().toLocaleString()
-              }
-            });
-          });
+        });
+        const data = await response.json();
+
+        // Show success message in chat
+        messageList.value.push({
+          type: 'text',
+          author: 'bot',
+          data: {
+            text: `Document "${file.name}" uploaded successfully! You can now ask questions about it.`,
+            meta: new Date().toLocaleString()
+          }
+        });
+      } catch (error) {
+        console.error('Error uploading file:', error);
       }
+    };
+
+    const triggerFileUpload = () => {
+      fileInput.value.click();
     };
 
     // Add styles for file messages
@@ -269,7 +284,10 @@ export default {
       onMessageWasSent,
       openChat,
       closeChat,
-      messageStyles
+      messageStyles,
+      fileInput,
+      triggerFileUpload,
+      handleFileUpload
     };
   }
 }
@@ -312,5 +330,24 @@ export default {
   font-size: 0.8em;
   color: #666;
   margin-top: 2px;
+}
+
+.file-upload-area {
+  padding: 10px;
+  text-align: center;
+  border-bottom: 1px solid #eee;
+}
+
+.file-upload-area input[type="file"] {
+  display: none;
+}
+
+.file-upload-area button {
+  padding: 8px 16px;
+  background: #4e8cff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
 }
 </style>

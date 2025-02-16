@@ -6,12 +6,13 @@ from langchain.schema import AIMessage, HumanMessage
 from langchain_ollama import OllamaLLM
 
 from .models import ChatSession, Message
+from documents.models import Document
 
 # Initialize Ollama model globally with optimized settings
 llm = OllamaLLM(
     model="llama3.2",
-    temperature=0.7,
-    num_ctx=2048,
+    temperature=0.3,
+    num_ctx=4096,  # Increased context window for improved answer accuracy
     num_thread=4,  # Optimize for multi-threading
     stop=["</s>", "Human:", "Assistant:"],  # Better conversation control
 )
@@ -19,10 +20,46 @@ llm = OllamaLLM(
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        await self.accept()
-        self.chat_session = await self.get_or_create_chat_session()
-        self.room_group_name = f"chat_{self.chat_session.id}"
-        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+        try:
+            # Parse query string more safely
+            query_string = self.scope["query_string"].decode()
+            query_params = {}
+            if query_string:
+                for param in query_string.split("&"):
+                    if "=" in param:
+                        key, value = param.split("=", 1)
+                        query_params[key.strip()] = value.strip()
+
+            # Extract clean session_id
+            session_id = query_params.get("session_id", "").split("?")[
+                0
+            ]  # Remove any trailing query params
+            self.scope["session_id"] = session_id
+            print(f"Connecting with session ID: {session_id}")
+
+            # Initialize room_group_name before potential errors
+            self.room_group_name = None
+
+            if not session_id:
+                print("No session ID provided")
+                await self.close()
+                return
+
+            await self.accept()
+            self.chat_session = await self.get_or_create_chat_session()
+            self.room_group_name = f"chat_{self.chat_session.id}"
+            await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+
+        except Exception as e:
+            print(f"Connection error: {str(e)}")
+            await self.close()
+
+    async def disconnect(self, close_code):
+        # Check if room_group_name exists before trying to access it
+        if hasattr(self, "room_group_name") and self.room_group_name:
+            await self.channel_layer.group_discard(
+                self.room_group_name, self.channel_name
+            )
 
     async def chat_message(self, event):
         """
@@ -30,16 +67,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
         This method is called when a message is received through the channel layer.
         """
         message = event["message"]
-        
-        # Send message to WebSocket
-        await self.send(text_data=json.dumps({
-            "type": "message",
-            "message": message
-        }))
 
-    async def disconnect(self, close_code):
-        # Leave room group
-        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+        # Send message to WebSocket
+        await self.send(text_data=json.dumps({"type": "message", "message": message}))
 
     async def receive(self, text_data):
         text_data_json = json.loads(text_data)
@@ -49,7 +79,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             user_message = text_data_json["text"]
 
             # Send typing indicator
-            await self.send(text_data=json.dumps({"type": "typing", "isTyping": True}))
+            await self.send(json.dumps({"type": "typing", "isTyping": True}))
 
             try:
                 # Process message and get response
@@ -61,27 +91,23 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 await self.save_message("user", user_message)
                 await self.save_message("assistant", response)
 
-                # Send response
-                await self.channel_layer.group_send(
-                    self.room_group_name, {"type": "chat_message", "message": response}
-                )
+                # Send response back to WebSocket
+                await self.send(json.dumps({"type": "message", "message": response}))
             except Exception as e:
-                # Handle errors gracefully
-                error_msg = f"Error processing message: {str(e)}"
                 await self.send(
-                    text_data=json.dumps({"type": "error", "message": error_msg})
+                    json.dumps({"type": "error", "message": f"Error: {str(e)}"})
                 )
             finally:
-                # Always turn off typing indicator
-                await self.send(
-                    text_data=json.dumps({"type": "typing", "isTyping": False})
-                )
+                await self.send(json.dumps({"type": "typing", "isTyping": False}))
 
     @database_sync_to_async
     def get_or_create_chat_session(self):
-        session, created = ChatSession.objects.get_or_create(
-            id=self.scope.get("session_id", None)
-        )
+        # Add debug prints
+        session_id = self.scope.get("session_id", None)
+        print(f"Attempting to get/create session with ID: {session_id}")
+
+        session, created = ChatSession.objects.get_or_create(id=session_id)
+        print(f"Session found/created: {session.id}, Created new: {created}")
         return session
 
     @database_sync_to_async
@@ -92,36 +118,57 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def get_context(self):
-        # Get chat history
+        """Get chat history and document context"""
+        # Debug current session
+        print(f"Current chat session ID: {self.chat_session.id}")
+
+        # Get all documents for this session
+        docs = Document.objects.filter(session=self.chat_session)
+
+        # Verify document count
+        doc_count = docs.count()
+        print(f"Number of documents found: {doc_count}")
+
+        # Rest of the function remains same
+        doc_context = ""
+        for doc in docs:
+            if doc.content:
+                doc_context += f"\nDocument '{doc.title}':\n{doc.content}\n---\n"
+        print("doc_context", doc_context)
+
+        # Get recent chat history
         messages = Message.objects.filter(session=self.chat_session).order_by(
-            "created_at"
-        )
+            "-created_at"
+        )[:5]
+        print("messages", messages)
         history = []
-        for msg in messages:
+        for msg in reversed(messages):
             if msg.role == "user":
                 history.append(HumanMessage(content=msg.content))
             else:
                 history.append(AIMessage(content=msg.content))
+        print("history", history)
 
-        # Get document content
-        docs = self.chat_session.documents.all()
-        doc_content = []
-        for doc in docs:
-            if doc.content:
-                doc_content.append(f"Document: {doc.title}\n{doc.content}")
-
-        return {"history": history, "documents": doc_content}
+        return {"history": history, "documents": doc_context}
 
     async def process_with_llama(self, user_message, context):
         template = """
         <|im_start|>system
-        You are a helpful AI assistant. Keep responses clear and concise.
+        You are a helpful AI assistant. Below is the content from uploaded documents and our conversation history.
         
-        Context:
+        DOCUMENTS CONTENT:
         {documents}
-        
-        Recent conversation:
+
+        CONVERSATION HISTORY:
         {history}
+
+        INSTRUCTIONS:
+        1. If the question is about document content, provide answers based on the documents above
+        2. If the question is about chat history, refer to the conversation history
+        3. If information cannot be found in either documents or history, clearly state that
+        4. Keep responses accurate, clear and concise
+        5. Always maintain context from both documents and previous messages
+
         <|im_end|>
         
         <|im_start|>user
@@ -131,25 +178,34 @@ class ChatConsumer(AsyncWebsocketConsumer):
         <|im_start|>assistant
         """
 
-        # Limit history to last 5 messages for faster processing
+        # Format context with better structure
         history_text = "\n".join(
             [
-                f"{'Human' if isinstance(msg, HumanMessage) else 'Assistant'}: {msg.content}"
-                for msg in context["history"][-5:]
+                f"{msg.__class__.__name__.replace('Message', '')}: {msg.content}"
+                for msg in context["history"]
             ]
         )
 
-        docs_text = "\n".join(context["documents"][:3])  # Limit to 3 most relevant docs
+        # Ensure document context is properly formatted
+        doc_context = (
+            context["documents"]
+            if context["documents"]
+            else "No documents uploaded yet."
+        )
 
-        prompt = PromptTemplate(
+        formatted_prompt = PromptTemplate(
             input_variables=["documents", "history", "question"], template=template
-        )
+        ).format(documents=doc_context, history=history_text, question=user_message)
+        print("formatted_prompt", formatted_prompt)
 
-        formatted_prompt = prompt.format(
-            documents=docs_text if docs_text else "No context available.",
-            history=history_text,
-            question=user_message,
-        )
+        # Adjust LLM parameters for better responses
+        llm.stop = [
+            "User:",
+            "Assistant:",
+            "<|im_start|>",
+            "<|im_end|>",
+        ]  # Prevent template leakage
 
-        response = llm(formatted_prompt)
-        return response.strip()
+        # Get response from LLM
+        response = await llm.agenerate([formatted_prompt])
+        return response.generations[0][0].text.strip()

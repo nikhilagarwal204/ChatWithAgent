@@ -1,8 +1,17 @@
 export default class WebSocketService {
     constructor(url) {
-        this.url = url;
+        // Get session ID from localStorage or generate new one
+        this.sessionId = localStorage.getItem('chatSessionId') || this.generateSessionId();
+        this.url = `${url}?session_id=${this.sessionId}`;
         this.socket = null;
         this.messageHandlers = [];
+        this.connect();
+    }
+
+    generateSessionId() {
+        const sessionId = crypto.randomUUID();
+        localStorage.setItem('chatSessionId', sessionId);
+        return sessionId;
     }
 
     connect() {
@@ -40,25 +49,9 @@ export default class WebSocketService {
 
     async send(message) {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-            if (message.file) {
-                // Handle file upload
-                const reader = new FileReader();
-                reader.onload = () => {
-                    const base64File = reader.result.split(',')[1];
-                    const fileMessage = {
-                        type: 'file',
-                        fileName: message.file.name,
-                        fileType: message.file.type,
-                        fileData: base64File
-                    };
-                    this.socket.send(JSON.stringify(fileMessage));
-                };
-                reader.readAsDataURL(message.file);
-            } else {
-                this.socket.send(JSON.stringify(message));
-            }
+            this.socket.send(JSON.stringify(message));
         } else {
-            console.error("WebSocket is not connected");
+            throw new Error("WebSocket is not connected");
         }
     }
 
