@@ -1,4 +1,3 @@
-# chat/management/commands/download_llama_model.py
 import os
 import requests
 from tqdm import tqdm

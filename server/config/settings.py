@@ -1,4 +1,3 @@
-# config/settings.py
 import os
 from pathlib import Path
 
@@ -115,3 +114,13 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 # Maximum upload file size: 10MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
+
+AGENT_CONFIG = {
+    "MAX_RETRIES": 3,
+    "REVIEW_ASPECTS": [
+        "relevance",
+        "context_usage",
+        "completeness",
+        "instruction_adherence",
+    ],
+}

@@ -1,9 +1,10 @@
 import json
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
-from langchain.prompts import PromptTemplate
 from langchain.schema import AIMessage, HumanMessage
 from langchain_ollama import OllamaLLM
+from .agents.producer import ProducerAgent
+from .agents.reviewer import ReviewerAgent
 
 from .models import ChatSession, Message
 from documents.models import Document
@@ -30,10 +31,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         key, value = param.split("=", 1)
                         query_params[key.strip()] = value.strip()
 
-            # Extract clean session_id
-            session_id = query_params.get("session_id", "").split("?")[
-                0
-            ]  # Remove any trailing query params
+            # Extract clean session_id & Remove any trailing query params
+            session_id = query_params.get("session_id", "").split("?")[0]
             self.scope["session_id"] = session_id
             print(f"Connecting with session ID: {session_id}")
 
@@ -152,60 +151,32 @@ class ChatConsumer(AsyncWebsocketConsumer):
         return {"history": history, "documents": doc_context}
 
     async def process_with_llama(self, user_message, context):
-        template = """
-        <|im_start|>system
-        You are a helpful AI assistant. Below is the content from uploaded documents and our conversation history.
-        
-        DOCUMENTS CONTENT:
-        {documents}
+        producer = ProducerAgent(llm)
+        reviewer = ReviewerAgent(llm)
+        max_retries = 3
+        feedback = None
+        final_response = None
 
-        CONVERSATION HISTORY:
-        {history}
+        for attempt in range(max_retries):
+            # Generate response with current context and feedback
+            response = await producer.generate_response(
+                context=context, question=user_message, feedback=feedback
+            )
 
-        INSTRUCTIONS:
-        1. If the question is about document content, provide answers based on the documents above
-        2. If the question is about chat history, refer to the conversation history
-        3. If information cannot be found in either documents or history, clearly state that
-        4. Keep responses accurate, clear and concise
-        5. Always maintain context from both documents and previous messages
+            # Review the generated response
+            review = await reviewer.evaluate_response(
+                response=response, context=context, question=user_message
+            )
 
-        <|im_end|>
-        
-        <|im_start|>user
-        {question}
-        <|im_end|>
-        
-        <|im_start|>assistant
-        """
+            if review["status"] == "approved":
+                final_response = review["response"]
+                break
 
-        # Format context with better structure
-        history_text = "\n".join(
-            [
-                f"{msg.__class__.__name__.replace('Message', '')}: {msg.content}"
-                for msg in context["history"]
-            ]
-        )
+            feedback = review.get("feedback", "General quality improvement needed")
 
-        # Ensure document context is properly formatted
-        doc_context = (
-            context["documents"]
-            if context["documents"]
-            else "No documents uploaded yet."
-        )
+        if not final_response:
+            final_response = (
+                "Unable to generate satisfactory response after multiple attempts"
+            )
 
-        formatted_prompt = PromptTemplate(
-            input_variables=["documents", "history", "question"], template=template
-        ).format(documents=doc_context, history=history_text, question=user_message)
-        print("formatted_prompt", formatted_prompt)
-
-        # Adjust LLM parameters for better responses
-        llm.stop = [
-            "User:",
-            "Assistant:",
-            "<|im_start|>",
-            "<|im_end|>",
-        ]  # Prevent template leakage
-
-        # Get response from LLM
-        response = await llm.agenerate([formatted_prompt])
-        return response.generations[0][0].text.strip()
+        return final_response
