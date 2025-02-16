@@ -23,6 +23,16 @@
           <div class="message-meta" v-if="message.data?.meta">
             <small>{{ message.data.meta }}</small>
           </div>
+          <!-- Add feedback buttons for bot messages only -->
+          <div class="feedback-buttons" v-if="message.author === 'bot'">
+            <button @click="submitFeedback(message.id, 'good')">
+              👍
+            </button>
+            <button @click="submitFeedback(message.id, 'bad')">
+              👎
+            </button>
+            <textarea v-model="feedbackComments[message.id]" placeholder="Optional Feedback" @click.stop></textarea>
+          </div>
         </div>
       </template>
     </beautiful-chat>
@@ -60,6 +70,7 @@ export default {
     const wsService = ref(null);
     const fileInput = ref(null);
     const sessionId = ref(null);
+    const feedbackComments = ref({});
 
     const botAvatarUrl = 'https://static.arttacsolutions.com/img/icon_atthene_interaction.svg';
 
@@ -273,6 +284,28 @@ export default {
       isOpen.value = false;
     };
 
+    const submitFeedback = async (messageId, rating) => {
+      try {
+        const response = await fetch('http://localhost:8000/api/feedback/', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            message_id: messageId,
+            rating,
+            comments: feedbackComments.value[messageId] || ''
+          })
+        });
+
+        if (response.ok) {
+          delete feedbackComments.value[messageId];
+        }
+      } catch (error) {
+        console.error('Feedback submission failed:', error);
+      }
+    };
+
     return {
       isOpen,
       messageList,
@@ -287,7 +320,9 @@ export default {
       messageStyles,
       fileInput,
       triggerFileUpload,
-      handleFileUpload
+      handleFileUpload,
+      feedbackComments,
+      submitFeedback,
     };
   }
 }
@@ -349,5 +384,36 @@ export default {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+}
+
+.feedback-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.feedback-buttons button {
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: white;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.feedback-buttons button:hover {
+  background-color: #f0f0f0;
+}
+
+.feedback-buttons textarea {
+  width: 100%;
+  margin-top: 4px;
+  padding: 4px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  resize: vertical;
+  min-height: 30px;
 }
 </style>
