@@ -127,6 +127,7 @@ export default {
         } else if (message.type === 'message') {
           showTypingIndicator.value = '';
           messageList.value.push({
+            id: message.message_id,  // Store the message ID
             type: 'text',
             author: 'bot',
             data: {

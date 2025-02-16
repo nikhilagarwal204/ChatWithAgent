@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import ChatSession, Message
+from .models import ChatSession, Message, Feedback
 
 
 class MessageInline(admin.TabularInline):
@@ -22,3 +22,18 @@ class MessageAdmin(admin.ModelAdmin):
     @admin.display(description="Content")
     def short_content(self, obj):
         return obj.content[:50] + "..." if len(obj.content) > 50 else obj.content
+
+
+@admin.register(Feedback)
+class FeedbackAdmin(admin.ModelAdmin):
+    list_display = ("session", "message", "rating", "created_at")
+    list_filter = ("rating", "created_at")
+    search_fields = ("comments",)
+
+    @admin.display(description="Message")
+    def message_content(self, obj):
+        return (
+            obj.message.content[:50] + "..."
+            if len(obj.message.content) > 50
+            else obj.message.content
+        )

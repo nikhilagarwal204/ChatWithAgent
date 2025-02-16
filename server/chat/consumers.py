@@ -1,4 +1,5 @@
 import json
+import uuid
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -89,10 +90,20 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
                 # Save messages after successful processing
                 await self.save_message("user", user_message)
-                await self.save_message("assistant", response)
+                message_data = await self.save_message("assistant", response)
 
                 # Send response and stop typing indicator
-                await self.send(json.dumps({"type": "message", "message": response}))
+                await self.send(
+                    json.dumps(
+                        {
+                            "type": "message",
+                            "message": message_data["content"],
+                            "message_id": message_data[
+                                "id"
+                            ],  # Include message ID in response
+                        }
+                    )
+                )
 
             except Exception as e:
                 await self.send(
@@ -114,9 +125,21 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def save_message(self, role, content):
-        return Message.objects.create(
-            session=self.chat_session, role=role, content=content
-        )
+        try:
+            message = Message.objects.create(
+                id=uuid.uuid4(),  # Explicitly generate UUID
+                session=self.chat_session,
+                role=role,
+                content=content,
+            )
+            return {
+                "id": str(message.id),  # Convert UUID to string
+                "content": message.content,
+                "role": message.role,
+            }
+        except Exception as e:
+            print(f"Error saving message: {str(e)}")
+            raise
 
     @database_sync_to_async
     def get_context(self):
