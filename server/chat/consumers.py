@@ -1,13 +1,14 @@
 import json
+
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+from documents.models import Document
 from langchain.schema import AIMessage, HumanMessage
 from langchain_ollama import OllamaLLM
+
 from .agents.producer import ProducerAgent
 from .agents.reviewer import ReviewerAgent
-
 from .models import ChatSession, Message
-from documents.models import Document
 
 # Initialize Ollama model globally with optimized settings
 llm = OllamaLLM(
@@ -77,7 +78,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         if message_type == "message":
             user_message = text_data_json["text"]
 
-            # Send typing indicator
+            # Only send typing indicator when actually processing a message
             await self.send(json.dumps({"type": "typing", "isTyping": True}))
 
             try:
@@ -90,13 +91,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 await self.save_message("user", user_message)
                 await self.save_message("assistant", response)
 
-                # Send response back to WebSocket
+                # Send response and stop typing indicator
                 await self.send(json.dumps({"type": "message", "message": response}))
+
             except Exception as e:
                 await self.send(
                     json.dumps({"type": "error", "message": f"Error: {str(e)}"})
                 )
             finally:
+                # Always ensure typing indicator is turned off
                 await self.send(json.dumps({"type": "typing", "isTyping": False}))
 
     @database_sync_to_async

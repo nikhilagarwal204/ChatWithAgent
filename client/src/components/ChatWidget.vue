@@ -5,14 +5,12 @@
       <input type="file" accept="application/pdf" @change="handleFileUpload" ref="fileInput">
       <button @click="triggerFileUpload">Upload PDF Document</button>
     </div>
-    <beautiful-chat :participants="participants" :titleImageUrl="titleImageUrl" :onMessageWasSent="onMessageWasSent"
-      :messageList="messageList" :newMessagesCount="newMessagesCount" :isOpen="isOpen" :close="closeChat"
-      :open="openChat" :showEmoji="true" :showFile="false" :acceptedFileTypes="['application/pdf']"
-      :showTypingIndicator="showTypingIndicator" :colors="colors" :alwaysScrollToBottom="true" :messageStyling="true">
+    <beautiful-chat :participants="participants" :onMessageWasSent="onMessageWasSent" :messageList="messageList"
+      :newMessagesCount="newMessagesCount" :isOpen="isOpen" :close="closeChat" :open="openChat" :showEmoji="true"
+      :showFile="false" :acceptedFileTypes="['application/pdf']" :showTypingIndicator="showTypingIndicator"
+      :colors="colors" :alwaysScrollToBottom="true" :messageStyling="true">
       <template v-slot:header>
-        <div class="sc-header--title">
-          <span class="sc-header--title-name">Chatbot Assistant</span>
-        </div>
+        Agent is Connected!
       </template>
       <template v-slot:message="{ message }">
         <FileMessage v-if="message.type === 'file'" :message="message" />
@@ -42,7 +40,6 @@
 <script>
 import Chat from 'vue3-beautiful-chat'
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { marked } from 'marked'
 import WebSocketService from '../utils/websocket.js'
 import FileMessage from './FileMessage.vue'
 
@@ -66,7 +63,7 @@ export default {
     const isOpen = ref(props.initialOpen);
     const messageList = ref([]);
     const newMessagesCount = ref(0);
-    const showTypingIndicator = ref(false);
+    const showTypingIndicator = ref('');
     const wsService = ref(null);
     const fileInput = ref(null);
     const sessionId = ref(null);
@@ -81,8 +78,6 @@ export default {
         imageUrl: botAvatarUrl
       }
     ]);
-
-    const titleImageUrl = computed(() => botAvatarUrl);
 
     const colors = {
       header: {
@@ -128,8 +123,9 @@ export default {
         console.log('Received message:', message); // Debug log
 
         if (message.type === 'typing') {
-          showTypingIndicator.value = message.isTyping;
+          showTypingIndicator.value = message.isTyping ? 'Agent is typing...' : '';
         } else if (message.type === 'message') {
+          showTypingIndicator.value = '';
           messageList.value.push({
             type: 'text',
             author: 'bot',
@@ -312,7 +308,6 @@ export default {
       newMessagesCount,
       showTypingIndicator,
       participants,
-      titleImageUrl,
       colors,
       onMessageWasSent,
       openChat,
