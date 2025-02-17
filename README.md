@@ -45,7 +45,13 @@ nikhilagarwal204-chatwithagent/
 
 ## 🎯 Features
 
-✅ **Real-time Chat** using WebSockets (Django Channels + ASGI + Daphne) ✅ **Multi-Agent AI Model** (Producer & Reviewer) for high-quality responses ✅ **Markdown Support** for AI-generated responses ✅ **File Uploads** (PDFs for AI context) ✅ **User Feedback** mechanism for model improvement ✅ **Dockerized Backend** for easy deployment
+- ✅ Real-time Chat using WebSockets (Django Channels + ASGI + Daphne)  
+- ✅ Multi-Agent AI Model (Producer & Reviewer) for high-quality responses  
+- ✅ Markdown Support for AI-generated responses  
+- ✅ File Uploads (PDFs for AI context)  
+- ✅ User Feedback mechanism for model improvement  
+- ✅ Dockerized Backend for easy deployment
+  
 
 ## 🤖 AI Agent Workflow
 ```mermaid
@@ -87,11 +93,9 @@ pip install -r requirements.txt
 python manage.py migrate
 
 ```
-#### **Ollama Install**
-
+#### **[Download Ollama](https://ollama.com/download/mac) & Run**
 ```sh
 ollama run llama3.2
-
 ```
 
 #### **Run WebSocket Server**
